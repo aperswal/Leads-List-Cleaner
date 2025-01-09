@@ -1,14 +1,14 @@
 "use client";
 
-export default function TermsOfService() {
+export default function Terms() {
   return (
     <div className="min-h-screen bg-white">
       <div className="max-w-4xl mx-auto px-4 py-16">
-        <h1 className="text-4xl font-bold text-gray-900 mb-8">Terms of Service</h1>
+        <h1 className="text-3xl font-bold text-gray-900 mb-6">Clean Leads Lists - Terms of Service</h1>
         
         <div className="prose prose-lg">
           <p className="text-lg text-gray-600 mb-8">
-            Welcome to Leadlistclean. By using our service, you agree to these terms. Please read them carefully.
+            Welcome to CleanLeadsLists. By using our service, you agree to these terms. Please read them carefully.
           </p>
 
           <h2>1. Terms</h2>

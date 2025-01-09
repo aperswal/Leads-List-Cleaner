@@ -348,7 +348,7 @@ const EmailCleaner = () => {
       const url = URL.createObjectURL(blob);
       
       link.setAttribute('href', url);
-      link.setAttribute('download', 'cleaned_email_list.csv');
+      link.setAttribute('download', 'clean_leads_lists.csv');
       link.style.visibility = 'hidden';
       
       document.body.appendChild(link);
@@ -450,25 +450,11 @@ const EmailCleaner = () => {
           </div>
         </div>
 
-        <div className="text-center mb-12">
+        <div className="text-center mb-8">
           <div className="flex items-center justify-center gap-2 mb-4">
-            <h1 className="text-[56px] font-bold text-gray-800">Leadlistclean</h1>
+            <h1 className="text-4xl font-bold mb-2">Clean Leads Lists</h1>
           </div>
-          <p className="text-xl text-gray-600 flex items-center justify-center gap-2">
-            Clean your email lists
-            <span className="bg-[#ffd966] text-gray-800 px-2 py-0.5 rounded-md font-medium">
-              Free
-            </span>
-          </p>
-          {credits === 0 && (
-            <div className="mt-4 text-[#217346] text-lg">
-              {user ? (
-                'You have used all your credits'
-              ) : (
-                'Sign in to get 3 more free credits!'
-              )}
-            </div>
-          )}
+          <p className="text-gray-600">Upload your CSV file with email columns to clean and verify your leads list</p>
         </div>
 
         <div className="bg-white rounded-3xl shadow-lg border p-0 overflow-hidden w-full max-w-2xl mx-auto">

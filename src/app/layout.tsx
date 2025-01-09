@@ -6,11 +6,11 @@ import { AuthContextProvider } from './context/AuthContext';
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'Leadlistclean - Email List Cleaner',
-  description: 'Clean and validate email addresses in your CSV files',
-  authors: [{ name: 'Leadlistclean', url: 'https://leadlistclean.com' }],
+  title: 'Clean Leads Lists',
+  description: 'Clean and verify your email lists efficiently',
+  authors: [{ name: 'CleanLeadsLists', url: 'https://CleanLeadsLists.com' }],
   keywords: ['email list', 'email validation', 'csv cleaner', 'email list cleaner'],
-  metadataBase: new URL('https://leadlistclean.com'),
+  metadataBase: new URL('https://CleanLeadsLists.com'),
 }
 
 export default function RootLayout({
@@ -28,7 +28,7 @@ export default function RootLayout({
           <footer className="h-16 bg-gray-50 border-t">
             <div className="max-w-5xl mx-auto px-4 h-full flex items-center justify-between">
               <div className="text-sm text-gray-600">
-                &copy; {new Date().getFullYear()} Leadlistclean. All rights reserved.
+                &copy; {new Date().getFullYear()} CleanLeadsLists. All rights reserved.
               </div>
               <div className="text-sm text-gray-600">
                 Need help? <a href="mailto:adityaperswal@gmail.com" className="text-[#217346] hover:underline">Contact Support</a>

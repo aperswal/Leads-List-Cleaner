@@ -8,7 +8,7 @@ export default function PrivacyPolicy() {
         
         <div className="prose prose-lg">
           <p className="text-lg text-gray-600 mb-8">
-            At Leadlistclean, we take your privacy seriously. This policy outlines how we handle your data.
+            At CleanLeadsLists, we take your privacy seriously. This policy outlines how we handle your data.
           </p>
           <h2>1. Information We Collect</h2>
           <p>
