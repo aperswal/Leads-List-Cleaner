@@ -7,6 +7,7 @@ import { useAuth } from '../context/AuthContext';
 import { doc, getDoc, setDoc, increment, collection, runTransaction } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { verifyEmail, verifyEmails } from '../lib/emailVerifier';
+import BuyCredits from './BuyCredits';
 
 interface ProcessedEmail {
   email: string;
@@ -26,6 +27,11 @@ const EmailCleaner = () => {
   const [verifiedEmails, setVerifiedEmails] = useState<number>(0);
   const [originalData, setOriginalData] = useState<any[][]>([]);
   const [emailColumnIndex, setEmailColumnIndex] = useState<number>(-1);
+  const [uniqueEmailCount, setUniqueEmailCount] = useState<number>(0);
+  const [showCreditCheck, setShowCreditCheck] = useState<boolean>(false);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [showBuyCredits, setShowBuyCredits] = useState<boolean>(false);
+  const [neededCredits, setNeededCredits] = useState<number>(0);
   const { user, signInWithGoogle, logout } = useAuth();
 
   // Fetch user's IP address
@@ -51,143 +57,98 @@ const EmailCleaner = () => {
 
   // Fetch credits based on user auth status or IP
   useEffect(() => {
-    let isMounted = true;
-
     const fetchCredits = async () => {
       try {
-        if (!userIP) {
-          console.log('Waiting for userIP...');
-          return;
-        }
-
-        console.log('Starting credit fetch. User:', user?.email, 'IP:', userIP);
-
         if (user) {
-          console.log('Fetching credits for user:', user.uid);
           const userRef = doc(db, 'users', user.uid);
+          const userDoc = await getDoc(userRef);
           
-          try {
-            const userDoc = await getDoc(userRef);
-            
-            if (!isMounted) return;
-
-            if (userDoc.exists()) {
-              const userData = userDoc.data();
-              const credits = userData.credits || 0;
-              console.log('Existing user data:', userData);
-              setCredits(credits);
-            } else {
-              console.log('New user, setting 3 credits');
-              const userData = {
-                credits: 3,
-                email: user.email,
-                createdAt: new Date().toISOString(),
-                lastLogin: new Date().toISOString()
-              };
-              await setDoc(userRef, userData);
-              console.log('Created new user document:', userData);
-              
-              if (!isMounted) return;
-              setCredits(3);
-            }
-          } catch (firestoreError) {
-            console.error('Firestore operation failed:', firestoreError);
-            setError('Failed to access user data. Please try again.');
+          if (!userDoc.exists()) {
+            // New user - give them 30 free credits
+            await setDoc(userRef, {
+              credits: 30,
+              email: user.email,
+              name: user.displayName,
+              createdAt: new Date().toISOString()
+            });
+            setCredits(30);
+          } else {
+            setCredits(userDoc.data().credits || 0);
           }
         } else {
-          console.log('Fetching credits for IP:', userIP);
-          const ipRef = doc(db, 'ip_credits', userIP);
+          // Anonymous user - give them 5 free credits based on IP
+          const ipRef = doc(db, 'anonymous_users', userIP || 'unknown');
+          const ipDoc = await getDoc(ipRef);
           
-          try {
-            const ipDoc = await getDoc(ipRef);
-            
-            if (!isMounted) return;
-
-            if (ipDoc.exists()) {
-              const ipData = ipDoc.data();
-              const credits = ipData.credits || 0;
-              console.log('Existing IP data:', ipData);
-              setCredits(credits);
-            } else {
-              console.log('New IP, setting 1 credit');
-              const ipData = {
-                credits: 1,
-                createdAt: new Date().toISOString(),
-                lastUsed: new Date().toISOString()
-              };
-              await setDoc(ipRef, ipData);
-              console.log('Created new IP document:', ipData);
-              
-              if (!isMounted) return;
-              setCredits(1);
-            }
-          } catch (firestoreError) {
-            console.error('Firestore operation failed:', firestoreError);
-            setError('Failed to access credit data. Please try again.');
+          if (!ipDoc.exists()) {
+            await setDoc(ipRef, {
+              credits: 5,
+              createdAt: new Date().toISOString()
+            });
+            setCredits(5);
+          } else {
+            setCredits(ipDoc.data().credits || 0);
           }
         }
       } catch (error) {
-        console.error('Error in credit fetch:', error);
-        if (isMounted) {
-          setError('Error loading credits. Please try refreshing the page.');
-        }
+        console.error('Error fetching credits:', error);
+        setCredits(0);
       }
     };
 
-    fetchCredits();
-
-    return () => {
-      isMounted = false;
-    };
+    if (userIP || user) {
+      fetchCredits();
+    }
   }, [user, userIP]);
 
   const useCredit = async () => {
     try {
-      if (!userIP) {
-        console.error('No userIP available');
+      if (credits === null || credits <= 0) {
+        setError(user ? 'No credits remaining.' : 'No credits remaining. Sign in to get 30 free credits!');
         return false;
       }
 
-      const docRef = user ? 
-        doc(db, 'users', user.uid) : 
-        doc(db, 'ip_credits', userIP);
-
-      // Use a transaction to ensure atomic credit updates
-      const success = await runTransaction(db, async (transaction) => {
-        const docSnap = await transaction.get(docRef);
-        
-        if (!docSnap.exists()) {
-          console.error('No credit document found');
-          return false;
-        }
-
-        const currentCredits = docSnap.data().credits || 0;
-        
-        if (currentCredits <= 0) {
-          console.log('No credits remaining');
-          return false;
-        }
-
-        // Update credits and timestamp
-        transaction.update(docRef, {
-          credits: currentCredits - 1,
-          lastUsed: new Date().toISOString(),
-          totalUsed: (docSnap.data().totalUsed || 0) + 1
+      if (user) {
+        const userRef = doc(db, 'users', user.uid);
+        await runTransaction(db, async (transaction) => {
+          const userDoc = await transaction.get(userRef);
+          if (!userDoc.exists()) {
+            throw new Error('User document not found');
+          }
+          
+          const currentCredits = userDoc.data().credits;
+          if (currentCredits <= 0) {
+            throw new Error('No credits remaining');
+          }
+          
+          transaction.update(userRef, {
+            credits: currentCredits - 1
+          });
         });
-
-        return true;
-      });
-
-      if (success) {
-        setCredits(prev => prev !== null ? prev - 1 : null);
-        return true;
-      } else {
-        setError('No credits remaining. Please sign in to get more credits.');
-        return false;
+      } else if (userIP) {
+        const ipRef = doc(db, 'anonymous_users', userIP);
+        await runTransaction(db, async (transaction) => {
+          const ipDoc = await transaction.get(ipRef);
+          if (!ipDoc.exists()) {
+            throw new Error('IP document not found');
+          }
+          
+          const currentCredits = ipDoc.data().credits;
+          if (currentCredits <= 0) {
+            throw new Error('No credits remaining');
+          }
+          
+          transaction.update(ipRef, {
+            credits: currentCredits - 1
+          });
+        });
       }
+
+      setCredits(prev => prev !== null ? prev - 1 : 0);
+      return true;
     } catch (error) {
       console.error('Error using credit:', error);
-      setError('Error updating credits. Please try again.');
+      setError('Error processing credits. Please try again.');
       return false;
     }
   };
@@ -202,26 +163,10 @@ const EmailCleaner = () => {
   };
 
   const processFile = async (file: File) => {
-    if (credits === null || credits <= 0) {
-      setError('No credits remaining. Please sign in to get more credits.');
-      return;
-    }
-
     try {
       setProcessing(true);
       setProgress(0);
       setError(null);
-
-      // First attempt to use a credit
-      const creditUsed = await useCredit();
-      if (!creditUsed) {
-        setProcessing(false);
-        return;
-      }
-
-      // Start timing the process
-      const startTime = Date.now();
-      const minProcessingTime = 2000; // Minimum 2 seconds for animation
 
       // Process the file
       Papa.parse(file, {
@@ -229,7 +174,7 @@ const EmailCleaner = () => {
         complete: async (results) => {
           try {
             const data = results.data as string[][];
-            if (data.length < 2) { // Need at least headers and one row
+            if (data.length < 2) {
               setError('CSV file is empty');
               setProcessing(false);
               return;
@@ -257,16 +202,51 @@ const EmailCleaner = () => {
             });
 
             const emailsToVerify = Array.from(uniqueEmails);
-            setTotalEmails(emailsToVerify.length);
             
-            // Verify emails with progress tracking
-            const verificationResults = await verifyEmails(
-              emailsToVerify,
-              (progress) => {
-                setProgress(progress);
-                setVerifiedEmails(Math.floor((progress / 100) * emailsToVerify.length));
+            // Check if user has enough credits
+            if (credits === null || credits < emailsToVerify.length) {
+              const remaining = credits || 0;
+              const needed = emailsToVerify.length;
+              if (user) {
+                setError(`Not enough credits. You need ${needed} credits but have ${remaining} remaining.`);
+              } else {
+                setError(`Not enough credits. Sign in to get 30 free credits! (Need: ${needed}, Have: ${remaining})`);
               }
-            );
+              setProcessing(false);
+              return;
+            }
+
+            setTotalEmails(emailsToVerify.length);
+            let verifiedCount = 0;
+            const verificationResults = [];
+
+            // Process emails one by one to ensure credit usage
+            for (const email of emailsToVerify) {
+              const creditUsed = await useCredit();
+              if (!creditUsed) {
+                setError('Credit usage failed. Please try again.');
+                setProcessing(false);
+                return;
+              }
+
+              try {
+                const result = await verifyEmail(email);
+                verificationResults.push(result);
+                verifiedCount++;
+                setVerifiedEmails(verifiedCount);
+                setProgress((verifiedCount / emailsToVerify.length) * 100);
+              } catch (error) {
+                console.error('Error verifying email:', email, error);
+                verificationResults.push({
+                  email,
+                  syntax: false,
+                  disposable: true,
+                  mxRecord: false,
+                  smtp: false,
+                  verified: false
+                });
+              }
+            }
 
             // Create a map of valid emails
             const validEmailsMap = new Map(
@@ -277,7 +257,7 @@ const EmailCleaner = () => {
 
             // Filter rows that have at least one valid email
             const validRows = [
-              headers, // Keep headers
+              headers,
               ...data.slice(1).filter(row => {
                 return emailColumns.some(colIndex => {
                   const email = row[colIndex]?.trim().toLowerCase();
@@ -286,14 +266,7 @@ const EmailCleaner = () => {
               })
             ];
 
-            // Calculate how long to wait to ensure minimum animation time
-            const processingTime = Date.now() - startTime;
-            const remainingTime = Math.max(0, minProcessingTime - processingTime);
-
-            // Wait for the remaining time before showing results
-            await new Promise(resolve => setTimeout(resolve, remainingTime));
-
-            if (validRows.length <= 1) { // Only headers
+            if (validRows.length <= 1) {
               setError('No valid emails found in the file');
               setProcessing(false);
               return;
@@ -307,14 +280,8 @@ const EmailCleaner = () => {
             setProcessing(false);
           }
         },
-        error: async (error) => {
+        error: (error) => {
           console.error('Error parsing CSV:', error);
-          
-          const processingTime = Date.now() - startTime;
-          const remainingTime = Math.max(0, minProcessingTime - processingTime);
-          
-          await new Promise(resolve => setTimeout(resolve, remainingTime));
-          
           setError('Error processing file. Please try again.');
           setProcessing(false);
         }
@@ -324,6 +291,82 @@ const EmailCleaner = () => {
       setError('Error processing file. Please try again.');
       setProcessing(false);
     }
+  };
+
+  const checkCredits = async (file: File) => {
+    try {
+      Papa.parse(file, {
+        header: false,
+        complete: async (results) => {
+          const data = results.data as string[][];
+          if (data.length < 2) {
+            setError('CSV file is empty');
+            return;
+          }
+
+          // Find all email columns
+          const headers = data[0];
+          const emailColumns = findEmailColumns(headers);
+
+          if (emailColumns.length === 0) {
+            setError('No email column found. Column header must contain "email"');
+            return;
+          }
+
+          // Extract all unique emails from all email columns
+          const uniqueEmails = new Set<string>();
+          data.slice(1).forEach(row => {
+            emailColumns.forEach(colIndex => {
+              const email = row[colIndex]?.trim();
+              if (email && validateEmail(email)) {
+                uniqueEmails.add(email.toLowerCase());
+              }
+            });
+          });
+
+          const emailCount = uniqueEmails.size;
+          setUniqueEmailCount(emailCount);
+          setPendingFile(file);
+          setShowCreditCheck(true);
+        },
+        error: (error) => {
+          console.error('Error parsing CSV:', error);
+          setError('Error processing file. Please try again.');
+        }
+      });
+    } catch (error) {
+      console.error('Error checking credits:', error);
+      setError('Error processing file. Please try again.');
+    }
+  };
+
+  const handleFileInput = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setFile(file);
+    setError(null);
+    setResult(null);
+    setProgress(0);
+    setVerifiedEmails(0);
+    setTotalEmails(0);
+    setShowCreditCheck(false);
+    setPendingFile(null);
+    
+    await checkCredits(file);
+  };
+
+  const startProcessing = async () => {
+    if (!pendingFile) return;
+    setShowCreditCheck(false);
+    await processFile(pendingFile);
+  };
+
+  const cancelProcessing = () => {
+    setShowCreditCheck(false);
+    setPendingFile(null);
+    setFile(null);
+    setUniqueEmailCount(0);
   };
 
   const validateEmail = (email: string): boolean => {
@@ -361,19 +404,6 @@ const EmailCleaner = () => {
     }
   };
 
-  const handleFileInput = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = e.target.files?.[0];
-    if (selectedFile?.type === "text/csv" || selectedFile?.name.endsWith('.csv')) {
-      if (credits === null || credits <= 0) {
-        setError('No credits remaining. Please sign in to get more credits.');
-        return;
-      }
-      await processFile(selectedFile);
-    } else {
-      setError("Please upload a CSV file");
-    }
-  };
-
   const handleDrop = async (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     const droppedFile = e.dataTransfer.files[0];
@@ -406,27 +436,39 @@ const EmailCleaner = () => {
     );
   };
 
+  const resetState = () => {
+    setFile(null);
+    setError(null);
+    setResult(null);
+    setProgress(0);
+    setVerifiedEmails(0);
+    setTotalEmails(0);
+    setShowCreditCheck(false);
+    setPendingFile(null);
+    setUniqueEmailCount(0);
+  };
+
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-gray-100 py-12">
       <div className="max-w-5xl mx-auto px-4 py-8">
         {/* Auth buttons and Credits */}
         <div className="flex justify-between items-center mb-8">
-          <div className="flex items-center gap-2">
-            <div className="bg-[#217346] bg-opacity-10 text-[#217346] px-4 py-2 rounded-lg font-medium">
-              {credits !== null ? (
-                <>
-                  <span className="font-bold">{credits}</span>
-                  {credits === 1 ? ' credit' : ' credits'} remaining
-                </>
-              ) : (
-                'Loading credits...'
+          <div className="flex items-center gap-4">
+            <div className="text-sm">
+              {credits !== null && (
+                <div className="flex items-center gap-2">
+                  <span>{credits} credits remaining</span>
+                  {user && (
+                    <button
+                      onClick={() => setShowBuyCredits(true)}
+                      className="text-[#217346] hover:text-[#1a5c38] font-medium"
+                    >
+                      Buy Credits
+                    </button>
+                  )}
+                </div>
               )}
             </div>
-            {!user && credits === 0 && (
-              <span className="text-sm text-gray-600">
-                Sign in to get 3 free credits!
-              </span>
-            )}
           </div>
           <div>
             {user ? (
@@ -444,7 +486,7 @@ const EmailCleaner = () => {
                 onClick={signInWithGoogle}
                 className="bg-[#217346] text-white px-4 py-2 rounded-lg hover:bg-[#1a5c38] transition-colors"
               >
-                Sign in for 3 Free Credits
+                Sign in for 30 Free Credits
               </button>
             )}
           </div>
@@ -455,10 +497,132 @@ const EmailCleaner = () => {
             <h1 className="text-4xl font-bold mb-2">Clean Leads Lists</h1>
           </div>
           <p className="text-gray-600">Upload your CSV file with email columns to clean and verify your leads list</p>
+          {credits !== null && (
+            <div className="mt-4">
+              <span className="font-semibold">{credits}</span> {credits === 1 ? 'credit' : 'credits'} remaining
+              {!user && credits === 0 && (
+                <div className="mt-2 text-[#217346]">
+                  Sign in to get 30 free credits!
+                </div>
+              )}
+              {!user && credits > 0 && (
+                <div className="mt-2 text-gray-500">
+                  Sign in to get 25 more free credits!
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="bg-white rounded-3xl shadow-lg border p-0 overflow-hidden w-full max-w-2xl mx-auto">
-          {processing ? (
+          {/* Results Screen */}
+          {!processing && result && (
+            <div className="p-8 text-center">
+              <div className="mb-6">
+                <h2 className="text-2xl font-bold text-gray-800 mb-2">Processing Complete!</h2>
+                <p className="text-gray-600">
+                  Found {result.length - 1} valid email{result.length === 2 ? '' : 's'}
+                </p>
+                {credits !== null && (
+                  <p className="text-gray-500 mt-2">
+                    {credits} credit{credits === 1 ? '' : 's'} remaining
+                  </p>
+                )}
+              </div>
+
+              <div className="flex justify-center gap-4">
+                <button
+                  onClick={downloadCleanedFile}
+                  className="bg-[#217346] text-white px-6 py-2 rounded-lg hover:bg-[#1a5c38] transition-colors"
+                >
+                  Download Cleaned CSV
+                </button>
+                <button
+                  onClick={resetState}
+                  className="bg-gray-200 text-gray-700 px-6 py-2 rounded-lg hover:bg-gray-300 transition-colors"
+                >
+                  Process Another File
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Credit Check Modal */}
+          {showCreditCheck && !result && (
+            <div className="p-8 text-center">
+              <h2 className="text-2xl font-bold mb-4">Credit Check</h2>
+              <p className="mb-4">
+                You have <span className="font-bold">{credits}</span> credits available
+              </p>
+              <p className="mb-4">
+                This file contains <span className="font-bold">{uniqueEmailCount}</span> unique emails to verify
+              </p>
+              {credits !== null && credits < uniqueEmailCount ? (
+                <div className="mb-4">
+                  <p className="text-red-500 font-bold mb-6">
+                    You need {uniqueEmailCount - credits} more credits
+                  </p>
+                  {!user ? (
+                    <div className="space-y-4">
+                      <p className="text-gray-700">
+                        Sign up now to get 30 free credits and unlock the ability to purchase more!
+                      </p>
+                      <div className="flex justify-center gap-4">
+                        <button
+                          onClick={signInWithGoogle}
+                          className="bg-[#217346] text-white px-6 py-2 rounded-lg hover:bg-[#1a5c38] transition-colors"
+                        >
+                          Sign Up for 30 Free Credits
+                        </button>
+                        <button
+                          onClick={cancelProcessing}
+                          className="bg-gray-200 text-gray-700 px-6 py-2 rounded-lg hover:bg-gray-300 transition-colors"
+                        >
+                          Go Back
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex justify-center gap-4">
+                      <button
+                        onClick={() => {
+                          setNeededCredits(uniqueEmailCount - credits);
+                          setShowBuyCredits(true);
+                        }}
+                        className="bg-[#217346] text-white px-6 py-2 rounded-lg hover:bg-[#1a5c38] transition-colors"
+                      >
+                        Buy Credits
+                      </button>
+                      <button
+                        onClick={cancelProcessing}
+                        className="bg-gray-200 text-gray-700 px-6 py-2 rounded-lg hover:bg-gray-300 transition-colors"
+                      >
+                        Go Back
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="flex justify-center gap-4">
+                  <button
+                    onClick={startProcessing}
+                    className="bg-[#217346] text-white px-6 py-2 rounded-lg hover:bg-[#1a5c38] transition-colors"
+                  >
+                    Start Processing
+                  </button>
+                  <button
+                    onClick={cancelProcessing}
+                    className="bg-gray-200 text-gray-700 px-6 py-2 rounded-lg hover:bg-gray-300 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Processing Animation */}
+          {processing && (
             <div className="aspect-[4/3] bg-gray-50 relative">
               <img 
                 src="/excel-animation.svg" 
@@ -467,46 +631,10 @@ const EmailCleaner = () => {
               />
               {renderProgress()}
             </div>
-          ) : result ? (
-            <div className="aspect-[4/3] flex items-center justify-center bg-gray-50">
-              <div className="text-center px-6">
-                <div className="mb-6">
-                  <h3 className="text-2xl font-semibold text-gray-900 mb-2">List Cleaned!</h3>
-                  <p className="text-gray-600">
-                    Your email list has been cleaned and is ready for download.
-                  </p>
-                  {credits > 0 ? (
-                    <p className="text-[#217346] mt-2">
-                      You have {credits} {credits === 1 ? 'credit' : 'credits'} remaining
-                    </p>
-                  ) : (
-                    <p className="text-[#217346] mt-2">
-                      {user ? 'You have used all your credits' : 'Sign in to get 3 more free credits!'}
-                    </p>
-                  )}
-                </div>
-                <div className="space-y-4">
-                  <button
-                    onClick={downloadCleanedFile}
-                    className="bg-[#217346] text-white px-6 py-3 rounded-lg hover:bg-[#1a5c38] transition-colors font-medium w-full"
-                  >
-                    Download Cleaned List
-                  </button>
-                  {credits > 0 && (
-                    <button
-                      onClick={() => {
-                        setResult(null);
-                        setFile(null);
-                      }}
-                      className="text-[#217346] border border-[#217346] px-6 py-3 rounded-lg hover:bg-gray-50 transition-colors font-medium w-full"
-                    >
-                      Clean Another List
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-          ) : (
+          )}
+
+          {/* File Upload Area */}
+          {!showCreditCheck && !processing && !result && (
             <div
               className="aspect-[4/3] bg-gray-50 flex items-center justify-center cursor-pointer hover:bg-gray-100 transition-colors"
               onDragOver={(e) => e.preventDefault()}
@@ -539,6 +667,14 @@ const EmailCleaner = () => {
             </div>
           )}
         </div>
+
+        {/* Buy Credits Modal */}
+        {showBuyCredits && (
+          <BuyCredits
+            defaultCredits={neededCredits || 100}
+            onClose={() => setShowBuyCredits(false)}
+          />
+        )}
 
         <div className="mt-4 text-center space-y-2">
           <p className="text-gray-500 text-sm">
