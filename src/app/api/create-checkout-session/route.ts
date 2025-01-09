@@ -16,8 +16,8 @@ export async function POST(req: Request) {
 
     const amount = Math.round(credits * pricePerCredit * 100); // Convert to cents
 
-    // Get the origin without www
-    const origin = (req.headers.get('origin') || '').replace('www.', '');
+    // Use leadlistclean.com domain
+    const baseUrl = 'https://leadlistclean.com';
 
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
@@ -35,12 +35,12 @@ export async function POST(req: Request) {
         },
       ],
       mode: 'payment',
-      success_url: `${origin}/success`,
-      cancel_url: `${origin}`,
+      success_url: `${baseUrl}/success`,
+      cancel_url: `${baseUrl}`,
       metadata: {
         credits: credits.toString(),
         userId: userId,
-        returnUrl: origin,
+        returnUrl: baseUrl,
       },
     });
 

@@ -1,0 +1,40 @@
+{
+  "cleanUrls": false,
+  "trailingSlash": false,
+  "redirects": [
+    {
+      "source": "/api/webhook/",
+      "destination": "/api/webhook",
+      "permanent": true
+    },
+    {
+      "source": "https://www.leadlistclean.com/:path*",
+      "destination": "https://leadlistclean.com/:path*",
+      "permanent": true
+    },
+    {
+      "source": "https://cleanleadslists.com/:path*",
+      "destination": "https://leadlistclean.com/:path*",
+      "permanent": true
+    },
+    {
+      "source": "https://www.cleanleadslists.com/:path*",
+      "destination": "https://leadlistclean.com/:path*",
+      "permanent": true
+    }
+  ],
+  "headers": [
+    {
+      "source": "/api/webhook",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store, no-cache, must-revalidate"
+        }
+      ]
+    }
+  ],
+  "domains": [
+    "leadlistclean.com"
+  ]
+}
