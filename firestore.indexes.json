@@ -1,0 +1,19 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "ip_credits",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "credits",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "lastUsed",
+          "order": "DESCENDING"
+        }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

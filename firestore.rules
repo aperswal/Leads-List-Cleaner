@@ -1,0 +1,31 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // User credits collection
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      
+      // Validate credit updates
+      allow update: if 
+        request.auth != null && 
+        request.auth.uid == userId &&
+        request.resource.data.credits >= 0;
+    }
+    
+    // IP-based credits collection
+    match /ip_credits/{ip} {
+      // Allow read/write only from your application's server
+      // For development, we'll allow from client but with restrictions
+      allow read: if true;
+      
+      // Only allow updates that don't set credits below 0
+      allow update: if 
+        request.resource.data.credits >= 0 &&
+        request.resource.data.credits <= 1;
+        
+      // Only allow creation with 1 initial credit
+      allow create: if 
+        request.resource.data.credits == 1;
+    }
+  }
+}
