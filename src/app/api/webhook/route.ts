@@ -2,7 +2,7 @@ import { headers } from 'next/headers';
 import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { db } from '@/app/lib/firebase';
-import { doc, runTransaction, getDoc } from 'firebase/firestore';
+import { doc, runTransaction, getDoc, updateDoc } from 'firebase/firestore';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: '2023-10-16',
@@ -11,26 +11,27 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
 const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
 export async function POST(req: Request) {
-  console.log('Webhook received');
+  console.log('Webhook endpoint hit');
   
   try {
     const body = await req.text();
     const headersList = headers();
     const sig = headersList.get('stripe-signature');
 
-    console.log('Headers:', {
-      'stripe-signature': sig?.substring(0, 20) + '...',
+    console.log('Request headers:', {
+      'stripe-signature': sig ? 'present' : 'missing',
+      'content-type': headersList.get('content-type'),
     });
 
     let event: Stripe.Event;
 
     try {
       if (!sig || !endpointSecret) {
-        console.error('Missing signature or secret:', { sig: !!sig, secret: !!endpointSecret });
+        console.error('Missing signature or secret');
         throw new Error('Missing stripe signature or endpoint secret');
       }
       event = stripe.webhooks.constructEvent(body, sig, endpointSecret);
-      console.log('Event constructed successfully:', event.type);
+      console.log('Event constructed:', event.type);
     } catch (err: any) {
       console.error('Webhook signature verification failed:', err.message);
       return new NextResponse(
@@ -45,63 +46,141 @@ export async function POST(req: Request) {
     // Handle the event
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object as Stripe.Checkout.Session;
-      console.log('Processing completed checkout:', {
-        sessionId: session.id,
-        metadata: session.metadata
-      });
+      console.log('Processing checkout session:', session.id);
       
       try {
-        // Get the credits amount from the metadata
+        // Verify payment status
+        if (session.payment_status !== 'paid') {
+          console.log('Payment not completed:', {
+            sessionId: session.id,
+            status: session.payment_status
+          });
+          return new NextResponse(
+            JSON.stringify({ 
+              error: 'Payment not completed',
+              status: session.payment_status 
+            }),
+            { 
+              status: 400,
+              headers: { 'Content-Type': 'application/json' }
+            }
+          );
+        }
+
+        // Verify payment intent status if available
+        if (session.payment_intent) {
+          const paymentIntent = await stripe.paymentIntents.retrieve(session.payment_intent as string);
+          if (paymentIntent.status !== 'succeeded') {
+            console.log('Payment intent not succeeded:', {
+              sessionId: session.id,
+              paymentIntentId: paymentIntent.id,
+              status: paymentIntent.status
+            });
+            return new NextResponse(
+              JSON.stringify({ 
+                error: 'Payment not succeeded',
+                status: paymentIntent.status 
+              }),
+              { 
+                status: 400,
+                headers: { 'Content-Type': 'application/json' }
+              }
+            );
+          }
+        }
+
         const credits = session.metadata?.credits ? parseInt(session.metadata.credits) : 0;
         const userId = session.metadata?.userId;
 
-        console.log('Extracted data:', { credits, userId });
+        console.log('Session metadata:', {
+          credits,
+          userId,
+          sessionId: session.id,
+          paymentStatus: session.payment_status
+        });
 
         if (!userId) {
           throw new Error('No user ID in session metadata');
         }
 
-        // First check if user exists
+        // Get user document
         const userRef = doc(db, 'users', userId);
         const userDoc = await getDoc(userRef);
-        
+
         if (!userDoc.exists()) {
-          console.error('User document not found:', userId);
-          throw new Error('User document does not exist!');
+          console.error('User not found:', userId);
+          throw new Error('User document not found');
         }
 
-        console.log('User document found:', {
-          currentCredits: userDoc.data().credits || 0
+        const currentCredits = userDoc.data().credits || 0;
+        const newCredits = currentCredits + credits;
+
+        console.log('Credit calculation:', {
+          currentCredits,
+          adding: credits,
+          newTotal: newCredits
         });
 
-        // Update user's credits in Firestore
-        await runTransaction(db, async (transaction) => {
-          const freshUserDoc = await transaction.get(userRef);
-          const currentCredits = freshUserDoc.data()?.credits || 0;
-          const newCredits = currentCredits + credits;
-          
-          console.log('Updating credits:', {
-            currentCredits,
-            addingCredits: credits,
-            newTotal: newCredits
-          });
-
-          transaction.update(userRef, {
+        // First try direct update
+        try {
+          await updateDoc(userRef, {
             credits: newCredits,
             lastCreditUpdate: new Date().toISOString(),
             lastPurchase: {
               amount: credits,
               date: new Date().toISOString(),
               total: newCredits,
-              sessionId: session.id
+              sessionId: session.id,
+              paymentIntentId: session.payment_intent,
+              amountPaid: session.amount_total
             }
           });
+          
+          console.log('Direct update successful');
+        } catch (updateError) {
+          console.error('Direct update failed, trying transaction:', updateError);
+          
+          // Fallback to transaction
+          await runTransaction(db, async (transaction) => {
+            const freshDoc = await transaction.get(userRef);
+            if (!freshDoc.exists()) {
+              throw new Error('User document not found in transaction');
+            }
+
+            const currentCredits = freshDoc.data().credits || 0;
+            const newCredits = currentCredits + credits;
+
+            transaction.update(userRef, {
+              credits: newCredits,
+              lastCreditUpdate: new Date().toISOString(),
+              lastPurchase: {
+                amount: credits,
+                date: new Date().toISOString(),
+                total: newCredits,
+                sessionId: session.id,
+                paymentIntentId: session.payment_intent,
+                amountPaid: session.amount_total
+              }
+            });
+          });
+          
+          console.log('Transaction update successful');
+        }
+
+        // Verify the update
+        const verifyDoc = await getDoc(userRef);
+        console.log('Verification:', {
+          finalCredits: verifyDoc.data()?.credits,
+          expectedCredits: newCredits
         });
 
-        console.log('Transaction completed successfully');
-        
         return new NextResponse(
-          JSON.stringify({ success: true }),
+          JSON.stringify({ 
+            success: true,
+            credits: newCredits,
+            userId,
+            paymentStatus: session.payment_status
+          }),
           { 
             status: 200,
             headers: { 'Content-Type': 'application/json' }
@@ -112,8 +191,12 @@ export async function POST(req: Request) {
           error: error.message,
           stack: error.stack
         });
+        
         return new NextResponse(
-          JSON.stringify({ error: 'Error processing payment: ' + error.message }),
+          JSON.stringify({ 
+            error: 'Error processing payment',
+            details: error.message 
+          }),
           { 
             status: 500,
             headers: { 'Content-Type': 'application/json' }
@@ -130,12 +213,16 @@ export async function POST(req: Request) {
       }
     );
   } catch (error: any) {
-    console.error('Webhook error:', {
+    console.error('Webhook handler error:', {
       error: error.message,
       stack: error.stack
     });
+    
     return new NextResponse(
-      JSON.stringify({ error: 'Internal server error: ' + error.message }),
+      JSON.stringify({ 
+        error: 'Internal server error',
+        details: error.message 
+      }),
       { 
         status: 500,
         headers: { 'Content-Type': 'application/json' }
