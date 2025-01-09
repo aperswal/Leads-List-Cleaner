@@ -55,13 +55,20 @@ export async function POST(req: Request) {
           }
 
           const currentCredits = userDoc.data().credits || 0;
+          const newCredits = currentCredits + credits;
           
           transaction.update(userRef, {
-            credits: currentCredits + credits,
+            credits: newCredits,
+            lastCreditUpdate: new Date().toISOString(),
+            lastPurchase: {
+              amount: credits,
+              date: new Date().toISOString(),
+              total: newCredits
+            }
           });
         });
 
-        console.log(`Successfully added ${credits} credits to user ${userId}`);
+        console.log(`Successfully added ${credits} credits to user ${userId}. New total: ${newCredits}`);
       } catch (error) {
         console.error('Error processing successful payment:', error);
         return NextResponse.json(

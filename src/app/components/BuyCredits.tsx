@@ -7,7 +7,7 @@ const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!
 interface BuyCreditsProps {
   defaultCredits?: number;
   onClose: () => void;
-  signInWithGoogle: () => void;
+  signInWithGoogle: () => Promise<void>;
 }
 
 export default function BuyCredits({ defaultCredits = 100, onClose, signInWithGoogle }: BuyCreditsProps) {
@@ -82,6 +82,16 @@ export default function BuyCredits({ defaultCredits = 100, onClose, signInWithGo
     }
   };
 
+  const handleSignIn = async () => {
+    try {
+      await signInWithGoogle();
+      // Close the modal after successful sign in
+      onClose();
+    } catch (error) {
+      console.error('Error signing in:', error);
+    }
+  };
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4">
@@ -93,10 +103,7 @@ export default function BuyCredits({ defaultCredits = 100, onClose, signInWithGo
             </p>
             <div className="flex justify-center gap-4">
               <button
-                onClick={() => {
-                  onClose();
-                  signInWithGoogle();
-                }}
+                onClick={handleSignIn}
                 className="bg-[#217346] text-white px-6 py-2 rounded-lg hover:bg-[#1a5c38] transition-colors"
               >
                 Sign Up Now

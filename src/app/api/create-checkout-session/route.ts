@@ -32,11 +32,12 @@ export async function POST(req: Request) {
         },
       ],
       mode: 'payment',
-      success_url: `${req.headers.get('origin')}/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${req.headers.get('origin')}/`,
+      success_url: `${req.headers.get('origin')}/success`,
+      cancel_url: `${req.headers.get('origin')}`,
       metadata: {
         credits: credits.toString(),
         userId: userId,
+        returnUrl: req.headers.get('referer') || '/',
       },
     });
 

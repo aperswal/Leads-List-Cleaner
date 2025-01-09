@@ -673,6 +673,7 @@ const EmailCleaner = () => {
           <BuyCredits
             defaultCredits={neededCredits || 100}
             onClose={() => setShowBuyCredits(false)}
+            signInWithGoogle={signInWithGoogle}
           />
         )}
 
