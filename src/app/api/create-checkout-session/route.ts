@@ -16,6 +16,9 @@ export async function POST(req: Request) {
 
     const amount = Math.round(credits * pricePerCredit * 100); // Convert to cents
 
+    // Get the origin without www
+    const origin = (req.headers.get('origin') || '').replace('www.', '');
+
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       line_items: [
@@ -32,12 +35,12 @@ export async function POST(req: Request) {
         },
       ],
       mode: 'payment',
-      success_url: `${req.headers.get('origin')}/success`,
-      cancel_url: `${req.headers.get('origin')}`,
+      success_url: `${origin}/success`,
+      cancel_url: `${origin}`,
       metadata: {
         credits: credits.toString(),
         userId: userId,
-        returnUrl: req.headers.get('referer') || '/',
+        returnUrl: origin,
       },
     });
 
